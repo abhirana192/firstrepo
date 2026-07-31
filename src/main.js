@@ -2,6 +2,7 @@ import { AudioEngine } from "./audioEngine.js";
 import { PitchGrid } from "./pitchGrid.js";
 import { TrackPanel } from "./trackPanel.js";
 import { detectPitch } from "./pitchDetector.js";
+import { PitchSmoother } from "./pitchSmoother.js";
 import { audioBufferToWavBlob, downloadBlob } from "./wavEncoder.js";
 
 const engine = new AudioEngine();
@@ -27,6 +28,7 @@ const downloadMixBtn = document.getElementById("downloadMixBtn");
 
 let timeDomainBuffer = null;
 let transportState = { isPlaying: false, isRecording: false, loopDuration: null };
+const pitchSmoother = new PitchSmoother();
 
 function fmtTime(sec) {
   const m = Math.floor(sec / 60);
@@ -87,6 +89,7 @@ recordBtn.addEventListener("click", () => {
   if (transportState.isRecording) {
     engine.stopRecording();
   } else {
+    pitchSmoother.buf = [];
     engine.startRecording();
   }
 });
@@ -121,7 +124,8 @@ downloadMixBtn.addEventListener("click", async () => {
 function frame() {
   if (engine.ctx && timeDomainBuffer) {
     engine.getLiveTimeDomainData(timeDomainBuffer);
-    const freq = detectPitch(timeDomainBuffer, engine.sampleRate);
+    const rawFreq = detectPitch(timeDomainBuffer, engine.sampleRate);
+    const freq = pitchSmoother.process(rawFreq);
 
     if (engine.isRecording) {
       engine.pushLivePitch(freq);
