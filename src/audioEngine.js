@@ -61,6 +61,11 @@ export class AudioEngine {
     this.recordingTrackId = null;
     this._recordChunks = [];
 
+    // How loud AGC leaves the raw mic signal varies a lot by device, so
+    // there's no single correct default — this is user-adjustable live via
+    // setInputGain() rather than guessed once in code.
+    this.inputGain = 2.5;
+
     this.onTracksChanged = null;
     this.onTransportChanged = null;
   }
@@ -105,7 +110,7 @@ export class AudioEngine {
     this.compressor.release.value = 0.2;
 
     this.makeupGain = this.ctx.createGain();
-    this.makeupGain.gain.value = 1.6;
+    this.makeupGain.gain.value = this.inputGain;
 
     this.saturator = this.ctx.createWaveShaper();
     this.saturator.curve = buildSoftClipCurve();
@@ -151,6 +156,14 @@ export class AudioEngine {
 
   getLiveTimeDomainData(target) {
     this.analyser.getFloatTimeDomainData(target);
+  }
+
+  /** Live-adjustable input gain (applies instantly, no restart needed). */
+  setInputGain(value) {
+    this.inputGain = value;
+    if (this.makeupGain) {
+      this.makeupGain.gain.linearRampToValueAtTime(value, this.ctx.currentTime + 0.05);
+    }
   }
 
   get sampleRate() {

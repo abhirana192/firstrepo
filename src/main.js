@@ -25,9 +25,27 @@ const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const downloadMixBtn = document.getElementById("downloadMixBtn");
+const gainSlider = document.getElementById("gainSlider");
+const gainValue = document.getElementById("gainValue");
 
 let timeDomainBuffer = null;
 let transportState = { isPlaying: false, isRecording: false, loopDuration: null };
+
+// Restore last-used gain (device mic levels vary a lot; no single default
+// is right for everyone, so this is meant to be tuned live and remembered).
+const storedGain = parseFloat(localStorage.getItem("vocalPracticeInputGain"));
+if (!Number.isNaN(storedGain)) {
+  engine.inputGain = storedGain;
+  gainSlider.value = String(storedGain);
+}
+gainValue.textContent = `${parseFloat(gainSlider.value).toFixed(1)}x`;
+
+gainSlider.addEventListener("input", () => {
+  const value = parseFloat(gainSlider.value);
+  gainValue.textContent = `${value.toFixed(1)}x`;
+  engine.setInputGain(value);
+  localStorage.setItem("vocalPracticeInputGain", String(value));
+});
 const pitchSmoother = new PitchSmoother();
 
 function fmtTime(sec) {
@@ -76,6 +94,7 @@ enableBtn.addEventListener("click", async () => {
     timeDomainBuffer = new Float32Array(engine.analyser.fftSize);
     overlay.classList.add("hidden");
     recordBtn.disabled = false;
+    gainSlider.disabled = false;
     statusText.textContent = "Record your first take to set the loop length";
   } catch (err) {
     console.error(err);
