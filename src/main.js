@@ -177,6 +177,59 @@ try {
   console.error("Download mix setup failed (non-fatal):", err);
 }
 
+let updateSeekBarVisual = null;
+
+try {
+  const seekBar = document.getElementById("seekBar");
+  const seekBarFill = document.getElementById("seekBarFill");
+  const seekBarHandle = document.getElementById("seekBarHandle");
+  const seekTimeCurrent = document.getElementById("seekTimeCurrent");
+  const seekTimeTotal = document.getElementById("seekTimeTotal");
+  if (seekBar && seekBarFill && seekBarHandle && seekTimeCurrent && seekTimeTotal) {
+    let dragging = false;
+
+    const fracFromEvent = (e) => {
+      const rect = seekBar.getBoundingClientRect();
+      return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    };
+
+    const setVisual = (frac) => {
+      seekBarFill.style.width = `${frac * 100}%`;
+      seekBarHandle.style.left = `${frac * 100}%`;
+    };
+
+    seekBar.addEventListener("pointerdown", (e) => {
+      if (engine.loopDuration === null || engine.isRecording) return;
+      dragging = true;
+      seekBar.setPointerCapture(e.pointerId);
+      const frac = fracFromEvent(e);
+      setVisual(frac);
+      engine.seekTo(frac * engine.loopDuration);
+    });
+    seekBar.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const frac = fracFromEvent(e);
+      setVisual(frac);
+      engine.seekTo(frac * engine.loopDuration);
+    });
+    const endDrag = () => { dragging = false; };
+    seekBar.addEventListener("pointerup", endDrag);
+    seekBar.addEventListener("pointercancel", endDrag);
+
+    updateSeekBarVisual = () => {
+      const hasLoop = engine.loopDuration !== null;
+      seekBar.classList.toggle("disabled", !hasLoop);
+      seekTimeTotal.textContent = hasLoop ? fmtTime(engine.loopDuration) : "0:00";
+      if (dragging) return; // don't fight the user's finger mid-drag
+      const t = engine.isPlaying ? engine.getPlayheadTime() : engine.isRecording ? engine.getRecordingElapsed() % (engine.loopDuration || 1) : 0;
+      seekTimeCurrent.textContent = fmtTime(t);
+      setVisual(hasLoop ? t / engine.loopDuration : 0);
+    };
+  }
+} catch (err) {
+  console.error("Seek bar setup failed (non-fatal):", err);
+}
+
 function frame() {
   if (engine.ctx && timeDomainBuffer) {
     engine.getLiveTimeDomainData(timeDomainBuffer);
@@ -201,6 +254,7 @@ function frame() {
       liveColor: engine.getRecordingColor(),
     });
   }
+  if (updateSeekBarVisual) updateSeekBarVisual();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

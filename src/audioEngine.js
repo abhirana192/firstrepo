@@ -302,6 +302,27 @@ export class AudioEngine {
     this._emitTransport();
   }
 
+  /**
+   * Jumps playback to a specific point in the loop (scrubbing). Not
+   * meaningful mid-recording — a new take's timing is defined by when it
+   * started, not by the playhead — so this is a no-op while recording.
+   */
+  seekTo(time) {
+    if (!this.ctx || this.loopDuration === null || this.isRecording) return;
+    const t = ((time % this.loopDuration) + this.loopDuration) % this.loopDuration;
+    this._stopScheduledSources();
+    const startAt = this.ctx.currentTime + LEAD_IN;
+    // Choose the origin so the playhead reads `t` the instant playback
+    // actually starts, then schedule this first (partial) pass from that
+    // offset into each track's buffer; every full pass after it goes
+    // through the normal tick()/_scheduleIteration(..., 0) path.
+    this.loopOriginCtxTime = startAt - t;
+    this.isPlaying = true;
+    this._scheduleIteration(startAt, null, t);
+    this._nextIterationStart = startAt + (this.loopDuration - t);
+    this._emitTransport();
+  }
+
   resetLoop() {
     this.stop();
     for (const gain of this._trackGains.values()) gain.disconnect();
@@ -369,15 +390,19 @@ export class AudioEngine {
     gain.gain.linearRampToValueAtTime(target, this.ctx.currentTime + 0.02);
   }
 
-  _scheduleIteration(startAt, excludeId = null) {
+  _scheduleIteration(startAt, excludeId = null, offset = 0) {
     for (const track of this.tracks) {
       if (!track.buffer || track.id === excludeId) continue;
+      // A track can be shorter than the loop (an overdub stopped early);
+      // if the seek offset lands past its own audio, there's nothing of
+      // this track left to play for the remainder of this pass.
+      if (offset >= track.buffer.duration) continue;
       const gain = this._trackGains.get(track.id);
       this._applyGain(track);
       const src = this.ctx.createBufferSource();
       src.buffer = track.buffer;
       src.connect(gain);
-      src.start(startAt);
+      src.start(startAt, offset);
       this._activeSources.push(src);
     }
   }
