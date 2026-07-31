@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0d12" />
+<title>Vocal Practice &mdash; Pitch Tracker &amp; Looper</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+
+  <header id="statusBar">
+    <span id="statusText">Tap "Enable Mic" to begin</span>
+    <span id="loopInfo"></span>
+  </header>
+
+  <div id="gainControl">
+    <label for="gainSlider">Input Gain</label>
+    <input type="range" id="gainSlider" min="0.5" max="8" step="0.1" value="2.5" disabled />
+    <span id="gainValue">2.5x</span>
+  </div>
+
+  <main id="gridWrap">
+    <canvas id="pitchCanvas"></canvas>
+    <div id="zoomControls">
+      <button id="zoomInBtn" class="zoomBtn" aria-label="Zoom in">+</button>
+      <button id="zoomOutBtn" class="zoomBtn" aria-label="Zoom out">&minus;</button>
+      <button id="zoomResetBtn" class="zoomBtn zoomResetBtn" aria-label="Reset zoom">&#8635;</button>
+    </div>
+    <div id="notePermOverlay" class="overlay">
+      <button id="enableBtn" class="bigBtn">🎤 Enable Mic &amp; Audio</button>
+      <p class="hint">Needs a one-time tap so iOS/Android allow microphone access.<br/>Use headphones to avoid feedback while overdubbing.</p>
+    </div>
+  </main>
+
+  <div id="seekBarWrap">
+    <span id="seekTimeCurrent" class="seekTime">0:00</span>
+    <div id="seekBar">
+      <div id="seekBarFill"></div>
+      <div id="seekBarHandle"></div>
+    </div>
+    <span id="seekTimeTotal" class="seekTime">0:00</span>
+  </div>
+
+  <section id="transport">
+    <button id="recordBtn" class="transportBtn record" disabled>
+      <span class="dot"></span> Record
+    </button>
+    <button id="playBtn" class="transportBtn" disabled>▶ Play</button>
+    <button id="stopBtn" class="transportBtn" disabled>■ Stop</button>
+    <button id="resetBtn" class="transportBtn ghost" disabled>⟲ Reset Loop</button>
+  </section>
+
+  <section id="trackPanel">
+    <div id="trackPanelHeader">
+      <span id="trackPanelTitle">Layers</span>
+      <button id="downloadMixBtn" disabled>⬇ Download Mix</button>
+    </div>
+    <div id="trackList"></div>
+    <p id="trackEmptyHint">No layers yet. Record your first take to set the loop length, then keep overdubbing on top.</p>
+  </section>
+
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
