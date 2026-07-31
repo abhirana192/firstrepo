@@ -39,8 +39,9 @@ try {
 }
 
 function fmtTime(sec) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
+  const clamped = Math.max(0, sec || 0);
+  const m = Math.floor(clamped / 60);
+  const s = Math.floor(clamped % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
@@ -221,9 +222,23 @@ try {
       seekBar.classList.toggle("disabled", !hasLoop);
       seekTimeTotal.textContent = hasLoop ? fmtTime(engine.loopDuration) : "0:00";
       if (dragging) return; // don't fight the user's finger mid-drag
-      const t = engine.isPlaying ? engine.getPlayheadTime() : engine.isRecording ? engine.getRecordingElapsed() % (engine.loopDuration || 1) : 0;
+
+      let t;
+      if (engine.isPlaying) {
+        t = engine.getPlayheadTime();
+      } else if (engine.isRecording) {
+        // First take in progress: there's no loop length yet to wrap
+        // against, so just count up plainly instead of modulo-ing against
+        // a meaningless placeholder (which previously pinned the display
+        // under 1 second — and thus always rendering as "0:00" — for the
+        // entire first recording, plus showed "-1:-1" during the brief
+        // negative window before the scheduled start time arrives).
+        t = Math.max(0, engine.getRecordingElapsed());
+      } else {
+        t = 0;
+      }
       seekTimeCurrent.textContent = fmtTime(t);
-      setVisual(hasLoop ? t / engine.loopDuration : 0);
+      setVisual(hasLoop ? Math.min(1, t / engine.loopDuration) : 0);
     };
   }
 } catch (err) {
@@ -231,30 +246,41 @@ try {
 }
 
 function frame() {
-  if (engine.ctx && timeDomainBuffer) {
-    engine.getLiveTimeDomainData(timeDomainBuffer);
-    const rawFreq = detectPitch(timeDomainBuffer, engine.sampleRate);
-    const freq = pitchSmoother.process(rawFreq);
+  // This loop drives live pitch monitoring, recording capture, and the
+  // scrub bar every single frame while recording/playing — an uncaught
+  // exception anywhere in it would otherwise stop requestAnimationFrame
+  // from ever being called again, permanently freezing the whole app
+  // (status text stuck, canvas frozen) while engine.isRecording stays
+  // true underneath with no way to recover short of a reload. Catch and
+  // log instead, and always keep the loop alive.
+  try {
+    if (engine.ctx && timeDomainBuffer) {
+      engine.getLiveTimeDomainData(timeDomainBuffer);
+      const rawFreq = detectPitch(timeDomainBuffer, engine.sampleRate);
+      const freq = pitchSmoother.process(rawFreq);
 
-    if (engine.isRecording) {
-      engine.pushLivePitch(freq);
+      if (engine.isRecording) {
+        engine.pushLivePitch(freq);
+      }
+
+      engine.tick();
+
+      grid.render({
+        tracks: engine.tracks,
+        loopDuration: engine.loopDuration,
+        playheadTime: engine.isPlaying ? engine.getPlayheadTime() : engine.getRecordingElapsed(),
+        isRecording: engine.isRecording,
+        recordingTrackId: engine.recordingTrackId,
+        liveRecordingPoints: engine.getLiveRecordingPoints(),
+        nowElapsed: engine.isRecording ? engine.getRecordingElapsed() : engine.getPlayheadTime(),
+        liveFreq: freq,
+        liveColor: engine.getRecordingColor(),
+      });
     }
-
-    engine.tick();
-
-    grid.render({
-      tracks: engine.tracks,
-      loopDuration: engine.loopDuration,
-      playheadTime: engine.isPlaying ? engine.getPlayheadTime() : engine.getRecordingElapsed(),
-      isRecording: engine.isRecording,
-      recordingTrackId: engine.recordingTrackId,
-      liveRecordingPoints: engine.getLiveRecordingPoints(),
-      nowElapsed: engine.isRecording ? engine.getRecordingElapsed() : engine.getPlayheadTime(),
-      liveFreq: freq,
-      liveColor: engine.getRecordingColor(),
-    });
+    if (updateSeekBarVisual) updateSeekBarVisual();
+  } catch (err) {
+    console.error("Render loop error (recovering):", err);
   }
-  if (updateSeekBarVisual) updateSeekBarVisual();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
