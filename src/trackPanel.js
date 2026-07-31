@@ -56,6 +56,13 @@ export class TrackPanel {
       toggle.setAttribute("aria-label", `Toggle ${track.name}`);
       toggle.onclick = () => this.engine.setEnabled(track.id, !track.enabled);
 
+      const punchInBtn = document.createElement("button");
+      punchInBtn.className = "trackPunchIn";
+      punchInBtn.textContent = "⏺";
+      punchInBtn.disabled = this.engine.isRecording;
+      punchInBtn.setAttribute("aria-label", `Punch in and re-record ${track.name} from the current scrub position`);
+      punchInBtn.onclick = () => this.engine.startPunchIn(track.id);
+
       const downloadBtn = document.createElement("button");
       downloadBtn.className = "trackDownload";
       downloadBtn.textContent = "⬇";
@@ -74,7 +81,7 @@ export class TrackPanel {
         if (confirm(`Delete ${track.name}?`)) this.engine.deleteTrack(track.id);
       };
 
-      row.append(swatch, name, dur, muteBtn, soloBtn, toggle, downloadBtn, del);
+      row.append(swatch, name, dur, muteBtn, soloBtn, toggle, punchInBtn, downloadBtn, del);
       this.listEl.appendChild(row);
     }
   }

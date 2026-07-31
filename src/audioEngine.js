@@ -65,6 +65,10 @@ export class AudioEngine {
     this.isRecording = false;
     this.recordingTrackId = null;
     this._recordChunks = [];
+    this._lastKnownPlayheadTime = 0; // persists the scrub position across stop/start, for punch-in
+    this._isPunchIn = false;
+    this._punchInTrackId = null;
+    this._punchInStartPoint = 0;
 
     // How loud AGC leaves the raw mic signal varies a lot by device, so
     // there's no single correct default — this is user-adjustable live via
@@ -263,6 +267,49 @@ export class AudioEngine {
     this._watchdogTimer = setTimeout(() => this._checkRecordingHealth(id), 1200);
   }
 
+  /**
+   * Punch-in: re-record into an *existing* track starting from wherever
+   * the scrub bar currently sits, rather than creating a new layer. Only
+   * the punched-in region gets replaced — audio (and its pitch curve)
+   * before the start point and after wherever you stop are left exactly
+   * as they were, same as punch-in on a tape deck.
+   */
+  async startPunchIn(trackId) {
+    if (this.isRecording || !this.ctx || this.loopDuration === null) return;
+    const track = this.tracks.find((t) => t.id === trackId);
+    if (!track || !track.buffer) return;
+    await this._ensureRunning();
+    if (this.isRecording || !this.ctx) return;
+
+    this._isPunchIn = true;
+    this._punchInTrackId = trackId;
+    this._punchInStartPoint = this.getPlayheadTime();
+    // Live curve rendering just needs a { pitchData, color } shape — reuse
+    // the target track's own color so it reads as "this layer" while
+    // recording, not a new one.
+    this._pendingTrack = { pitchData: [], color: track.color };
+
+    this._stopScheduledSources();
+    const startAt = this.ctx.currentTime + LEAD_IN;
+    this.loopOriginCtxTime = startAt - this._punchInStartPoint;
+    this.recordStartCtxTime = startAt;
+    this.recorderNode.port.postMessage({ cmd: "arm", time: startAt });
+    this.isRecording = true;
+    this.isPlaying = true;
+    this.recordingTrackId = trackId;
+    this._recordChunks = [];
+    // Existing tracks (including the one being punched into) already have
+    // a gain node from when they were first recorded — reuse it rather
+    // than creating a new one, which would silently orphan the original.
+    this._scheduleIteration(startAt, /* excludeId */ trackId);
+    this._nextIterationStart = startAt + (this.loopDuration - this._punchInStartPoint);
+
+    this._emitTransport();
+
+    clearTimeout(this._watchdogTimer);
+    this._watchdogTimer = setTimeout(() => this._checkRecordingHealth(trackId), 1200);
+  }
+
   _checkRecordingHealth(expectedId) {
     if (!this.isRecording || this.recordingTrackId !== expectedId) return; // already resolved normally
     if (this._recordChunks.length > 0) return; // audio is flowing, all good
@@ -274,6 +321,9 @@ export class AudioEngine {
     this.recorderNode.port.postMessage({ cmd: "stop" });
     this.isRecording = false;
     this._recordChunks = [];
+    // A punch-in's pending object has no `id` (it reuses the target
+    // track's existing gain node rather than owning one) — this correctly
+    // no-ops for that case and only cleans up a newly-created track's gain.
     const staleId = this._pendingTrack?.id;
     if (staleId != null) {
       this._trackGains.get(staleId)?.disconnect();
@@ -281,6 +331,8 @@ export class AudioEngine {
     }
     this.recordingTrackId = null;
     this._pendingTrack = null;
+    this._isPunchIn = false;
+    this._punchInTrackId = null;
     this._emitTransport();
     // Try to leave the context in a working state for the next attempt.
     await this._ensureRunning();
@@ -302,6 +354,16 @@ export class AudioEngine {
       offset += chunk.length;
     }
     this._recordChunks = [];
+
+    if (this._isPunchIn) {
+      this._finalizePunchIn(data);
+      this._isPunchIn = false;
+      this.recordingTrackId = null;
+      this._pendingTrack = null;
+      this._emitTracks();
+      this._emitTransport();
+      return;
+    }
 
     const track = this._pendingTrack;
     const durationSec = data.length / this.sampleRate;
@@ -350,6 +412,41 @@ export class AudioEngine {
     this._emitTransport();
   }
 
+  // Merges a punch-in take into its target track: the recorded region
+  // (clipped to the loop boundary, same as any overdub) replaces exactly
+  // that slice of the buffer and pitch curve; everything before the punch
+  // point and after wherever it stopped is left untouched, same as
+  // punch-in on a tape deck.
+  _finalizePunchIn(data) {
+    const track = this.tracks.find((t) => t.id === this._punchInTrackId);
+    if (!track) return; // track was deleted mid-take — nothing sane to merge into
+
+    normalizePeak(data, 0.98);
+
+    const startSample = Math.round(this._punchInStartPoint * this.sampleRate);
+    const maxAvailable = Math.max(0, Math.round(this.loopDuration * this.sampleRate) - startSample);
+    const newSamples = Math.min(data.length, maxAvailable);
+    const endSample = startSample + newSamples;
+    const endPoint = endSample / this.sampleRate;
+
+    const oldData = track.buffer.getChannelData(0);
+    const finalLength = Math.max(oldData.length, endSample, 1);
+    const merged = new Float32Array(finalLength);
+    merged.set(oldData.subarray(0, Math.min(startSample, oldData.length)), 0);
+    if (newSamples > 0) merged.set(data.subarray(0, newSamples), startSample);
+    if (oldData.length > endSample) merged.set(oldData.subarray(endSample), endSample);
+
+    const buffer = this.ctx.createBuffer(1, finalLength, this.sampleRate);
+    buffer.copyToChannel(merged, 0);
+    track.buffer = buffer;
+    track.durationSec = finalLength / this.sampleRate;
+
+    const newPoints = this._pendingTrack ? this._pendingTrack.pitchData : [];
+    const before = track.pitchData.filter((p) => p.time < this._punchInStartPoint);
+    const after = track.pitchData.filter((p) => p.time >= endPoint);
+    track.pitchData = [...before, ...newPoints, ...after];
+  }
+
   async play() {
     if (!this.ctx || this.loopDuration === null || this.isPlaying) return;
     await this._ensureRunning();
@@ -366,6 +463,7 @@ export class AudioEngine {
 
   stop() {
     if (this.isRecording) this.stopRecording();
+    if (this.isPlaying) this._lastKnownPlayheadTime = this.getPlayheadTime();
     this._stopScheduledSources();
     this.isPlaying = false;
     this._emitTransport();
@@ -403,6 +501,7 @@ export class AudioEngine {
     this.loopOriginCtxTime = null;
     this._nextIterationStart = null;
     this._nextTrackId = 1; // a full reset is a fresh session — safe (and expected) to renumber from Track 1
+    this._lastKnownPlayheadTime = 0;
     this._emitTracks();
     this._emitTransport();
   }
@@ -501,10 +600,20 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Returns the current position in the loop. While playing, that's the
+   * live playhead; while stopped, it's wherever playback last was —
+   * needed so scrubbing to a spot, stopping, then punching in starts
+   * exactly where you left the scrub bar rather than snapping to 0.
+   */
   getPlayheadTime() {
-    if (!this.isPlaying || this.loopOriginCtxTime === null || this.loopDuration === null) return 0;
+    if (!this.isPlaying || this.loopOriginCtxTime === null || this.loopDuration === null) {
+      return this._lastKnownPlayheadTime || 0;
+    }
     const elapsed = this.ctx.currentTime - this.loopOriginCtxTime;
-    return ((elapsed % this.loopDuration) + this.loopDuration) % this.loopDuration;
+    const t = ((elapsed % this.loopDuration) + this.loopDuration) % this.loopDuration;
+    this._lastKnownPlayheadTime = t;
+    return t;
   }
 
   getRecordingElapsed() {
@@ -515,7 +624,9 @@ export class AudioEngine {
   /** Appends a live-detected pitch sample to the in-progress take. */
   pushLivePitch(freq) {
     if (!this.isRecording || !this._pendingTrack) return;
-    const time = this.getRecordingElapsed();
+    // A punch-in's own elapsed time starts at 0, but its position on the
+    // loop's timeline starts at the punch-in point.
+    const time = (this._isPunchIn ? this._punchInStartPoint : 0) + this.getRecordingElapsed();
     this._pendingTrack.pitchData.push({ time, freq: freq > 0 ? freq : null });
   }
 
@@ -573,7 +684,13 @@ export class AudioEngine {
 
   _emitTransport() {
     if (this.onTransportChanged) {
-      this.onTransportChanged({ isPlaying: this.isPlaying, isRecording: this.isRecording, loopDuration: this.loopDuration });
+      this.onTransportChanged({
+        isPlaying: this.isPlaying,
+        isRecording: this.isRecording,
+        loopDuration: this.loopDuration,
+        isPunchIn: this._isPunchIn,
+        punchInTrackId: this._punchInTrackId,
+      });
     }
   }
 }

@@ -360,6 +360,18 @@ html, body {
 .trackToggle.enabled { background: rgba(79, 209, 255, 0.25); }
 .trackToggle.enabled::after { transform: translateX(16px); background: var(--accent); }
 
+.trackPunchIn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 84, 112, 0.35);
+  background: rgba(255, 84, 112, 0.1);
+  color: var(--danger);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.trackPunchIn:disabled { opacity: 0.35; border-color: var(--border); color: var(--text-dim); background: transparent; }
+
 .trackDownload {
   width: 30px;
   height: 30px;

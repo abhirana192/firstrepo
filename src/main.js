@@ -55,7 +55,12 @@ function updateTransportUI() {
   if (downloadMixBtn) downloadMixBtn.disabled = engine.tracks.length === 0;
 
   if (transportState.isRecording) {
-    statusText.textContent = hasLoop ? "Recording overdub…" : "Recording take 1 — this sets the loop length…";
+    if (transportState.isPunchIn) {
+      const t = engine.tracks.find((tr) => tr.id === transportState.punchInTrackId);
+      statusText.textContent = `Punch-in recording ${t ? t.name : "layer"}…`;
+    } else {
+      statusText.textContent = hasLoop ? "Recording overdub…" : "Recording take 1 — this sets the loop length…";
+    }
   } else if (transportState.isPlaying) {
     statusText.textContent = "Playing loop";
   } else if (hasLoop) {
@@ -69,6 +74,7 @@ function updateTransportUI() {
 
 engine.onTransportChanged = (t) => {
   transportState = t;
+  trackPanel.render(engine.tracks); // keeps each track's punch-in button enabled state in sync
   updateTransportUI();
 };
 
@@ -239,7 +245,10 @@ try {
         // negative window before the scheduled start time arrives).
         t = Math.max(0, engine.getRecordingElapsed());
       } else {
-        t = 0;
+        // Idle: getPlayheadTime() now remembers the last scrubbed/stopped
+        // position instead of resetting to 0, so punch-in starts exactly
+        // where the bar was left rather than snapping back to the top.
+        t = engine.getPlayheadTime();
       }
       seekTimeCurrent.textContent = fmtTime(t);
       setVisual(hasLoop ? Math.min(1, t / engine.loopDuration) : 0);
