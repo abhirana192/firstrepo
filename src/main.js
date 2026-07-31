@@ -19,6 +19,9 @@ const recordBtn = document.getElementById("recordBtn");
 const playBtn = document.getElementById("playBtn");
 const stopBtn = document.getElementById("stopBtn");
 const resetBtn = document.getElementById("resetBtn");
+const zoomInBtn = document.getElementById("zoomInBtn");
+const zoomOutBtn = document.getElementById("zoomOutBtn");
+const zoomResetBtn = document.getElementById("zoomResetBtn");
 
 let timeDomainBuffer = null;
 let transportState = { isPlaying: false, isRecording: false, loopDuration: null };
@@ -84,6 +87,10 @@ recordBtn.addEventListener("click", () => {
     engine.startRecording();
   }
 });
+
+zoomInBtn.addEventListener("click", () => grid.zoomIn());
+zoomOutBtn.addEventListener("click", () => grid.zoomOut());
+zoomResetBtn.addEventListener("click", () => grid.resetView());
 
 playBtn.addEventListener("click", () => engine.play());
 stopBtn.addEventListener("click", () => engine.stop());

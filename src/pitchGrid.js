@@ -56,6 +56,19 @@ export class PitchGrid {
     this.centerTimeSec = null;
   }
 
+  /** Zoom in/out around the current view center (for +/- button controls). */
+  zoomBy(factor) {
+    const ranges = this._currentVisibleRanges();
+    const newZoom = clamp(this.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    this._applyZoomAtAnchor(newZoom, { x: 0.5, y: 0.5 }, this.centerMidi, ranges.mode === "loop" ? this.centerTimeSec : null);
+  }
+  zoomIn() {
+    this.zoomBy(1.4);
+  }
+  zoomOut() {
+    this.zoomBy(1 / 1.4);
+  }
+
   // --- Coordinate transforms (all take an explicit `ranges` so gesture
   // handlers and render() share identical math) ------------------------
 

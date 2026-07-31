@@ -4,7 +4,7 @@
 const MIN_FREQ_HZ = 65;   // below F2, gives the parabolic fit some headroom
 const MAX_FREQ_HZ = 1100; // above A5, same reason
 const ANALYSIS_WINDOW = 1024; // samples correlated at each lag
-const RMS_SILENCE_THRESHOLD = 0.01;
+const RMS_SILENCE_THRESHOLD = 0.005;
 
 /**
  * @param {Float32Array} buffer time-domain samples from an AnalyserNode

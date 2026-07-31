@@ -59,13 +59,41 @@ export class AudioEngine {
     await this.ctx.audioWorklet.addModule("src/recorderWorkletProcessor.js");
 
     this.sourceNode = this.ctx.createMediaStreamSource(stream);
+
+    // Quiet input (soft/whispered singing) is otherwise too weak to pass
+    // the pitch detector's noise-floor threshold or to hear back on
+    // playback. A compressor pulls quiet passages up toward audibility;
+    // makeup gain then boosts overall level; a fast brickwall limiter
+    // afterward keeps normal/loud singing from clipping on the way out.
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -50;
+    this.compressor.knee.value = 24;
+    this.compressor.ratio.value = 8;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.25;
+
+    this.makeupGain = this.ctx.createGain();
+    this.makeupGain.gain.value = 2.4;
+
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -3;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.001;
+    this.limiter.release.value = 0.1;
+
+    this.sourceNode.connect(this.compressor);
+    this.compressor.connect(this.makeupGain);
+    this.makeupGain.connect(this.limiter);
+    this.processedInput = this.limiter;
+
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;
     this.analyser.smoothingTimeConstant = 0;
-    this.sourceNode.connect(this.analyser);
+    this.processedInput.connect(this.analyser);
 
     this.recorderNode = new AudioWorkletNode(this.ctx, "recorder-processor");
-    this.sourceNode.connect(this.recorderNode);
+    this.processedInput.connect(this.recorderNode);
     this.recorderNode.port.onmessage = (event) => {
       if (this.isRecording) this._recordChunks.push(event.data);
     };
