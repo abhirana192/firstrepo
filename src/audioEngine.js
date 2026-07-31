@@ -52,6 +52,11 @@ export class AudioEngine {
     this.tracks = []; // { id, name, color, buffer, pitchData, muted, soloed, enabled, durationSec }
     this._trackGains = new Map(); // id -> persistent GainNode
     this._activeSources = []; // sources scheduled for the current/next loop iteration
+    // Monotonic, never reused — tracks.length + 1 would reassign a
+    // deleted track's old id to the next recording, colliding with any
+    // surviving track that still has it (corrupting the gain-node map and
+    // making mute/solo/delete affect the wrong track).
+    this._nextTrackId = 1;
 
     this.loopDuration = null;
     this.loopOriginCtxTime = null;
@@ -174,7 +179,7 @@ export class AudioEngine {
 
   startRecording() {
     if (this.isRecording || !this.ctx) return;
-    const id = this.tracks.length + 1;
+    const id = this._nextTrackId++;
     const track = {
       id,
       name: `Track ${id}`,
@@ -331,6 +336,7 @@ export class AudioEngine {
     this.loopDuration = null;
     this.loopOriginCtxTime = null;
     this._nextIterationStart = null;
+    this._nextTrackId = 1; // a full reset is a fresh session — safe (and expected) to renumber from Track 1
     this._emitTracks();
     this._emitTransport();
   }
@@ -345,6 +351,7 @@ export class AudioEngine {
     if (this.tracks.length === 0) {
       this.loopDuration = null;
       this.loopOriginCtxTime = null;
+      this._nextTrackId = 1; // nothing left — fresh session, renumber from Track 1
       this.stop();
     }
     this._emitTracks();
