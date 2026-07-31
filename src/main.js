@@ -77,6 +77,10 @@ engine.onTracksChanged = (tracks) => {
   updateTransportUI();
 };
 
+engine.onRecordingStalled = () => {
+  statusText.textContent = "Recording didn't start (mic got interrupted) — tap Record to try again.";
+};
+
 // --- Core transport: wired first and unconditionally, so a missing or
 // stale element anywhere else on the page (e.g. an older cached index.html
 // paired with a newer main.js) can never prevent recording/playback from

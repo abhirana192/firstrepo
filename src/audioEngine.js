@@ -73,6 +73,7 @@ export class AudioEngine {
 
     this.onTracksChanged = null;
     this.onTransportChanged = null;
+    this.onRecordingStalled = null;
   }
 
   async init() {
@@ -191,7 +192,10 @@ export class AudioEngine {
   async _ensureRunning() {
     if (this.ctx && this.ctx.state !== "running") {
       try {
-        await this.ctx.resume();
+        // resume() has been observed to hang indefinitely rather than
+        // reject in some mobile states; never let it block recording
+        // from at least attempting to proceed.
+        await Promise.race([this.ctx.resume(), new Promise((resolve) => setTimeout(resolve, 800))]);
       } catch (err) {
         console.error("AudioContext resume failed:", err);
       }
@@ -247,10 +251,45 @@ export class AudioEngine {
     }
 
     this._emitTransport();
+
+    // Recording having started (isRecording=true, UI updated) doesn't
+    // guarantee audio is actually flowing — a context that's stuck
+    // suspended, or that resume() silently failed to wake, produces no
+    // worklet messages at all, with no exception anywhere to catch. That
+    // previously left the app showing "Recording…" indefinitely with no
+    // way out short of a reload. Check shortly after starting whether any
+    // audio has actually arrived, and self-recover if not.
+    clearTimeout(this._watchdogTimer);
+    this._watchdogTimer = setTimeout(() => this._checkRecordingHealth(id), 1200);
+  }
+
+  _checkRecordingHealth(expectedId) {
+    if (!this.isRecording || this.recordingTrackId !== expectedId) return; // already resolved normally
+    if (this._recordChunks.length > 0) return; // audio is flowing, all good
+    console.error("Recording watchdog: no audio captured after 1.2s — recovering from a stuck AudioContext");
+    this._recoverFromStalledRecording();
+  }
+
+  async _recoverFromStalledRecording() {
+    this.recorderNode.port.postMessage({ cmd: "stop" });
+    this.isRecording = false;
+    this._recordChunks = [];
+    const staleId = this._pendingTrack?.id;
+    if (staleId != null) {
+      this._trackGains.get(staleId)?.disconnect();
+      this._trackGains.delete(staleId);
+    }
+    this.recordingTrackId = null;
+    this._pendingTrack = null;
+    this._emitTransport();
+    // Try to leave the context in a working state for the next attempt.
+    await this._ensureRunning();
+    if (this.onRecordingStalled) this.onRecordingStalled();
   }
 
   stopRecording() {
     if (!this.isRecording) return;
+    clearTimeout(this._watchdogTimer);
     this.recorderNode.port.postMessage({ cmd: "stop" });
     this.isRecording = false;
 
