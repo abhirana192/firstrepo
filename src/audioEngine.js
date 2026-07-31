@@ -42,10 +42,14 @@ export class AudioEngine {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     this.ctx = new Ctx();
 
+    // Echo cancellation and noise suppression apply adaptive filtering that
+    // can distort the waveform pitch detection relies on, so those stay
+    // off. Auto gain control is left on (the default) — phone mic input
+    // without it is often too quiet to detect or hear back on playback.
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        audio: { echoCancellation: false, noiseSuppression: false },
       });
     } catch (err) {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -69,6 +73,17 @@ export class AudioEngine {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 1;
     this.masterGain.connect(this.ctx.destination);
+
+    // Some mobile browsers only keep pulling nodes for processing while
+    // they're part of a graph that reaches the destination. The analyser
+    // and recorder never output audible sound of their own, so route them
+    // to the destination through a silent (zero-gain) sink purely to keep
+    // them actively processing on every render quantum.
+    this._silentSink = this.ctx.createGain();
+    this._silentSink.gain.value = 0;
+    this.analyser.connect(this._silentSink);
+    this.recorderNode.connect(this._silentSink);
+    this._silentSink.connect(this.ctx.destination);
 
     if (this.ctx.state === "suspended") await this.ctx.resume();
   }
