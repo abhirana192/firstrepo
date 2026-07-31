@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0d12" />
+<title>Vocal Practice &mdash; Pitch Tracker &amp; Looper</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+
+  <header id="statusBar">
+    <span id="statusText">Tap "Enable Mic" to begin</span>
+    <span id="loopInfo"></span>
+  </header>
+
+  <main id="gridWrap">
+    <canvas id="pitchCanvas"></canvas>
+    <div id="notePermOverlay" class="overlay">
+      <button id="enableBtn" class="bigBtn">🎤 Enable Mic &amp; Audio</button>
+      <p class="hint">Needs a one-time tap so iOS/Android allow microphone access.<br/>Use headphones to avoid feedback while overdubbing.</p>
+    </div>
+  </main>
+
+  <section id="transport">
+    <button id="recordBtn" class="transportBtn record" disabled>
+      <span class="dot"></span> Record
+    </button>
+    <button id="playBtn" class="transportBtn" disabled>▶ Play</button>
+    <button id="stopBtn" class="transportBtn" disabled>■ Stop</button>
+    <button id="resetBtn" class="transportBtn ghost" disabled>⟲ Reset Loop</button>
+  </section>
+
+  <section id="trackPanel">
+    <div id="trackList"></div>
+    <p id="trackEmptyHint">No layers yet. Record your first take to set the loop length, then keep overdubbing on top.</p>
+  </section>
+
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
