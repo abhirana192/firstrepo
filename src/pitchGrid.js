@@ -243,15 +243,19 @@ export class PitchGrid {
     for (let midi = lo; midi <= hi; midi++) {
       const name = midiToNoteName(midi);
       const isNatural = NATURAL_NOTE_RE.test(name);
-      if (!isNatural && !showAccidentals) continue;
       const y = this._midiToY(midi, ranges);
-      ctx.strokeStyle = isNatural ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)";
+      // Sharp/flat gridlines are always drawn (faint) so their position is
+      // visible even fully zoomed out; only the text label is gated behind
+      // zoom, since labeling all 12 semitones at once gets unreadable.
+      ctx.strokeStyle = isNatural ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.045)";
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(this.width, y);
       ctx.stroke();
-      ctx.fillStyle = isNatural ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.14)";
-      ctx.fillText(name, 4, y - 1);
+      if (isNatural || showAccidentals) {
+        ctx.fillStyle = isNatural ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.16)";
+        ctx.fillText(name, 4, y - 1);
+      }
     }
     ctx.restore();
   }

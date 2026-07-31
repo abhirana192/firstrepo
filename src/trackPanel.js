@@ -1,3 +1,5 @@
+import { audioBufferToWavBlob, downloadBlob } from "./wavEncoder.js";
+
 function fmt(sec) {
   if (!sec) return "0:00";
   const m = Math.floor(sec / 60);
@@ -7,7 +9,7 @@ function fmt(sec) {
 
 /**
  * Renders the track management list and wires Mute / Solo / Layer-toggle /
- * Delete controls straight to AudioEngine callbacks.
+ * Delete / Download controls straight to AudioEngine callbacks.
  */
 export class TrackPanel {
   constructor(listEl, emptyHintEl, engine) {
@@ -54,6 +56,16 @@ export class TrackPanel {
       toggle.setAttribute("aria-label", `Toggle ${track.name}`);
       toggle.onclick = () => this.engine.setEnabled(track.id, !track.enabled);
 
+      const downloadBtn = document.createElement("button");
+      downloadBtn.className = "trackDownload";
+      downloadBtn.textContent = "⬇";
+      downloadBtn.setAttribute("aria-label", `Download ${track.name}`);
+      downloadBtn.onclick = () => {
+        const buffer = this.engine.getTrackBuffer(track.id);
+        if (!buffer) return;
+        downloadBlob(audioBufferToWavBlob(buffer), `${track.name.replace(/\s+/g, "-").toLowerCase()}.wav`);
+      };
+
       const del = document.createElement("button");
       del.className = "trackDelete";
       del.textContent = "✕";
@@ -62,7 +74,7 @@ export class TrackPanel {
         if (confirm(`Delete ${track.name}?`)) this.engine.deleteTrack(track.id);
       };
 
-      row.append(swatch, name, dur, muteBtn, soloBtn, toggle, del);
+      row.append(swatch, name, dur, muteBtn, soloBtn, toggle, downloadBtn, del);
       this.listEl.appendChild(row);
     }
   }

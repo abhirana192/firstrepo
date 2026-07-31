@@ -3,6 +3,30 @@ import { TRACK_COLORS } from "./noteUtils.js";
 const LEAD_IN = 0.06; // seconds of scheduling headroom for Web Audio start() calls
 const SCHEDULE_AHEAD = 0.2; // how far ahead the loop scheduler queues the next iteration
 
+// tanh-shaped soft clipper: near-identity for quiet/moderate input, rounds
+// off smoothly toward the driven gain's high end instead of hard-clipping.
+function buildSoftClipCurve() {
+  const n = 2048;
+  const drive = 1.6;
+  const norm = Math.tanh(drive);
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(x * drive) / norm;
+  }
+  return curve;
+}
+
+// Scales `data` down in place if its peak exceeds `ceiling`; leaves it
+// untouched otherwise so quieter takes aren't attenuated unnecessarily.
+function normalizePeak(data, ceiling) {
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+  if (peak <= ceiling) return;
+  const scale = ceiling / peak;
+  for (let i = 0; i < data.length; i++) data[i] *= scale;
+}
+
 /**
  * Loop-based multi-track vocal recorder/looper.
  *
@@ -60,45 +84,32 @@ export class AudioEngine {
 
     this.sourceNode = this.ctx.createMediaStreamSource(stream);
 
-    // A gentle compressor evens out dynamics without crushing normal
-    // singing (a low threshold + high ratio combo would flatten average
-    // level far more than a modest makeup gain could restore — that's
-    // what made an earlier version of this chain too quiet). Quiet/soft
-    // passages sit below the threshold and pass through mostly untouched,
-    // then get lifted by the makeup gain along with everything else. A
-    // fast brickwall limiter after the makeup gain stops loud singing
-    // from clipping on the way out.
+    // A compressor evens out dynamics so quiet passages sit closer to loud
+    // ones, then a large makeup gain pushes overall level up substantially.
+    // A soft-saturation curve afterward is the actual safety net: unlike a
+    // straight-line WaveShaper (which just scales everything down uniformly
+    // and does nothing near the edges — a mistake in an earlier version of
+    // this chain), a tanh curve stays close to linear (no coloration) for
+    // small values and rounds off smoothly as it approaches full scale,
+    // so it's safe to drive this chain hot without harsh digital clipping.
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -28;
+    this.compressor.threshold.value = -32;
     this.compressor.knee.value = 12;
-    this.compressor.ratio.value = 3;
+    this.compressor.ratio.value = 4;
     this.compressor.attack.value = 0.02;
     this.compressor.release.value = 0.2;
 
     this.makeupGain = this.ctx.createGain();
-    this.makeupGain.gain.value = 4;
+    this.makeupGain.gain.value = 6;
 
-    this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -2;
-    this.limiter.knee.value = 0;
-    this.limiter.ratio.value = 20;
-    this.limiter.attack.value = 0.001;
-    this.limiter.release.value = 0.1;
-
-    // DynamicsCompressorNode's gain reduction is envelope-smoothed, so a
-    // sudden loud attack can still overshoot 0dB before it catches up.
-    // A WaveShaperNode's curve is a true sample-accurate clamp — anything
-    // outside [-1, 1] maps straight to the nearest curve endpoint — so it
-    // acts as a real brickwall backstop with no attack lag at all.
-    this.clipper = this.ctx.createWaveShaper();
-    this.clipper.curve = new Float32Array([-0.98, 0, 0.98]);
-    this.clipper.oversample = "2x";
+    this.saturator = this.ctx.createWaveShaper();
+    this.saturator.curve = buildSoftClipCurve();
+    this.saturator.oversample = "4x";
 
     this.sourceNode.connect(this.compressor);
     this.compressor.connect(this.makeupGain);
-    this.makeupGain.connect(this.limiter);
-    this.limiter.connect(this.clipper);
-    this.processedInput = this.clipper;
+    this.makeupGain.connect(this.saturator);
+    this.processedInput = this.saturator;
 
     // A bigger analysis window gives the pitch detector enough cycles of
     // a low bass note to autocorrelate reliably (2048 samples starts
@@ -221,6 +232,13 @@ export class AudioEngine {
       this._emitTransport();
       return;
     }
+
+    // The capture chain's saturator is tuned for headroom on the *live*
+    // output stage, but the samples it writes can still land a hair past
+    // ±1. Normalize once here so both loop playback and every future
+    // export inherit a safe buffer, instead of relying on each downstream
+    // consumer to guard against it separately.
+    normalizePeak(data, 0.98);
 
     if (this.loopDuration === null) {
       const buffer = this.ctx.createBuffer(1, data.length, this.sampleRate);
@@ -391,6 +409,46 @@ export class AudioEngine {
 
   getRecordingColor() {
     return this._pendingTrack ? this._pendingTrack.color : "#ffffff";
+  }
+
+  // --- Export ------------------------------------------------------------
+
+  /** Raw AudioBuffer for a single track, regardless of its mute state. */
+  getTrackBuffer(id) {
+    const track = this.tracks.find((t) => t.id === id);
+    return track && track.buffer ? track.buffer : null;
+  }
+
+  /**
+   * Offline-renders exactly what's currently audible (same mute/solo/
+   * enabled routing as live playback) into a single mixed-down AudioBuffer.
+   */
+  async renderMixBuffer() {
+    if (this.loopDuration == null) return null;
+    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const length = Math.max(1, Math.round(this.loopDuration * this.sampleRate));
+    const offlineCtx = new OfflineCtx(1, length, this.sampleRate);
+
+    let anyAudible = false;
+    for (const track of this.tracks) {
+      if (!track.buffer) continue;
+      const gain = this._effectiveGain(track);
+      if (gain <= 0) continue;
+      anyAudible = true;
+      const src = offlineCtx.createBufferSource();
+      src.buffer = track.buffer;
+      const g = offlineCtx.createGain();
+      g.gain.value = gain;
+      src.connect(g);
+      g.connect(offlineCtx.destination);
+      src.start(0);
+    }
+    if (!anyAudible) return null;
+
+    // Summing multiple tracks at unity gain can exceed ±1 (OfflineAudioContext
+    // doesn't clip on its own); audioBufferToWavBlob normalizes on export if
+    // needed, so no extra handling is required here.
+    return offlineCtx.startRendering();
   }
 
   _emitTracks() {

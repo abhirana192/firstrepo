@@ -2,6 +2,7 @@ import { AudioEngine } from "./audioEngine.js";
 import { PitchGrid } from "./pitchGrid.js";
 import { TrackPanel } from "./trackPanel.js";
 import { detectPitch } from "./pitchDetector.js";
+import { audioBufferToWavBlob, downloadBlob } from "./wavEncoder.js";
 
 const engine = new AudioEngine();
 const grid = new PitchGrid(document.getElementById("pitchCanvas"));
@@ -22,6 +23,7 @@ const resetBtn = document.getElementById("resetBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
+const downloadMixBtn = document.getElementById("downloadMixBtn");
 
 let timeDomainBuffer = null;
 let transportState = { isPlaying: false, isRecording: false, loopDuration: null };
@@ -39,6 +41,7 @@ function updateTransportUI() {
   playBtn.disabled = !hasLoop || transportState.isRecording;
   stopBtn.disabled = !(transportState.isPlaying || transportState.isRecording);
   resetBtn.disabled = engine.tracks.length === 0;
+  downloadMixBtn.disabled = engine.tracks.length === 0;
 
   if (transportState.isRecording) {
     statusText.textContent = hasLoop ? "Recording overdub…" : "Recording take 1 — this sets the loop length…";
@@ -96,6 +99,23 @@ playBtn.addEventListener("click", () => engine.play());
 stopBtn.addEventListener("click", () => engine.stop());
 resetBtn.addEventListener("click", () => {
   if (confirm("Clear all layers and start a new loop?")) engine.resetLoop();
+});
+
+downloadMixBtn.addEventListener("click", async () => {
+  downloadMixBtn.disabled = true;
+  const originalText = downloadMixBtn.textContent;
+  downloadMixBtn.textContent = "Rendering…";
+  try {
+    const mixBuffer = await engine.renderMixBuffer();
+    if (!mixBuffer) {
+      alert("Nothing is currently audible to mix — check that at least one layer isn't muted.");
+    } else {
+      downloadBlob(audioBufferToWavBlob(mixBuffer), "vocal-practice-mix.wav");
+    }
+  } finally {
+    downloadMixBtn.textContent = originalText;
+    downloadMixBtn.disabled = engine.tracks.length === 0;
+  }
 });
 
 function frame() {
