@@ -5,9 +5,13 @@ const SCHEDULE_AHEAD = 0.2; // how far ahead the loop scheduler queues the next 
 
 // tanh-shaped soft clipper: near-identity for quiet/moderate input, rounds
 // off smoothly toward the driven gain's high end instead of hard-clipping.
+// A lower drive keeps the pass-band closer to true identity (a tanh curve
+// normalized to its endpoint inherently adds a bit of gain near zero —
+// higher drive means more of it, which is part of what made an earlier
+// version of this chain louder than intended).
 function buildSoftClipCurve() {
   const n = 2048;
-  const drive = 1.6;
+  const drive = 0.8;
   const norm = Math.tanh(drive);
   const curve = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -84,23 +88,24 @@ export class AudioEngine {
 
     this.sourceNode = this.ctx.createMediaStreamSource(stream);
 
-    // A compressor evens out dynamics so quiet passages sit closer to loud
-    // ones, then a large makeup gain pushes overall level up substantially.
-    // A soft-saturation curve afterward is the actual safety net: unlike a
-    // straight-line WaveShaper (which just scales everything down uniformly
-    // and does nothing near the edges — a mistake in an earlier version of
-    // this chain), a tanh curve stays close to linear (no coloration) for
-    // small values and rounds off smoothly as it approaches full scale,
-    // so it's safe to drive this chain hot without harsh digital clipping.
+    // getUserMedia's autoGainControl is already doing the primary loudness
+    // normalization on-device (real hardware AGC, unlike the synthetic
+    // fake-audio-capture used in testing, which doesn't simulate it — that
+    // gap is exactly what let the previous, much hotter version of this
+    // chain go unnoticed: stacking a second full normalizer on top of AGC
+    // compounded into audibly "too much gain"). This chain is now a light
+    // supplementary touch on top of AGC, not a second normalizer: a gentle
+    // compressor for safety headroom, a modest makeup nudge, and a soft-
+    // saturation curve as a true (non-harsh) ceiling for stray peaks.
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -32;
-    this.compressor.knee.value = 12;
-    this.compressor.ratio.value = 4;
+    this.compressor.threshold.value = -24;
+    this.compressor.knee.value = 10;
+    this.compressor.ratio.value = 2.5;
     this.compressor.attack.value = 0.02;
     this.compressor.release.value = 0.2;
 
     this.makeupGain = this.ctx.createGain();
-    this.makeupGain.gain.value = 6;
+    this.makeupGain.gain.value = 1.6;
 
     this.saturator = this.ctx.createWaveShaper();
     this.saturator.curve = buildSoftClipCurve();
