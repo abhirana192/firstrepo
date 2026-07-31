@@ -177,8 +177,31 @@ export class AudioEngine {
 
   // --- Transport -----------------------------------------------------
 
-  startRecording() {
+  /**
+   * Mobile browsers (iOS Safari in particular) can silently suspend the
+   * AudioContext during any sufficiently long blocking pause — a native
+   * confirm() dialog, backgrounding the tab, a screen lock — with no event
+   * telling the page it happened. If that occurs, the whole audio graph
+   * simply stops processing: the recorder worklet never fires, so
+   * recording looks like it starts (isRecording flips true, the UI
+   * updates) but silently captures nothing. Every entry point that starts
+   * audio activity resumes defensively first rather than assuming the
+   * context is already running.
+   */
+  async _ensureRunning() {
+    if (this.ctx && this.ctx.state !== "running") {
+      try {
+        await this.ctx.resume();
+      } catch (err) {
+        console.error("AudioContext resume failed:", err);
+      }
+    }
+  }
+
+  async startRecording() {
     if (this.isRecording || !this.ctx) return;
+    await this._ensureRunning();
+    if (this.isRecording || !this.ctx) return; // re-check: state may have changed during the await
     const id = this._nextTrackId++;
     const track = {
       id,
@@ -288,7 +311,9 @@ export class AudioEngine {
     this._emitTransport();
   }
 
-  play() {
+  async play() {
+    if (!this.ctx || this.loopDuration === null || this.isPlaying) return;
+    await this._ensureRunning();
     if (!this.ctx || this.loopDuration === null || this.isPlaying) return;
     this._stopScheduledSources();
     const startAt = this.ctx.currentTime + LEAD_IN;
@@ -312,7 +337,9 @@ export class AudioEngine {
    * meaningful mid-recording — a new take's timing is defined by when it
    * started, not by the playhead — so this is a no-op while recording.
    */
-  seekTo(time) {
+  async seekTo(time) {
+    if (!this.ctx || this.loopDuration === null || this.isRecording) return;
+    await this._ensureRunning();
     if (!this.ctx || this.loopDuration === null || this.isRecording) return;
     const t = ((time % this.loopDuration) + this.loopDuration) % this.loopDuration;
     this._stopScheduledSources();
