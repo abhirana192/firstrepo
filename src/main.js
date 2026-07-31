@@ -150,6 +150,17 @@ function initOptionalFeatures() {
   } catch (err) {
     console.error("Gain slider setup failed (non-fatal):", err);
   }
+
+  try {
+    const importRefBtn = document.getElementById("importRefBtn");
+    const importRefHint = document.getElementById("importRefHint");
+    if (importRefBtn) {
+      importRefBtn.disabled = false;
+      if (importRefHint) importRefHint.hidden = false;
+    }
+  } catch (err) {
+    console.error("Reference-track button enable failed (non-fatal):", err);
+  }
 }
 
 try {
@@ -186,6 +197,43 @@ try {
   }
 } catch (err) {
   console.error("Download mix setup failed (non-fatal):", err);
+}
+
+try {
+  const importRefBtn = document.getElementById("importRefBtn");
+  const importRefInput = document.getElementById("importRefInput");
+  const importRefProgress = document.getElementById("importRefProgress");
+  const importRefProgressFill = document.getElementById("importRefProgressFill");
+  if (importRefBtn && importRefInput) {
+    importRefBtn.addEventListener("click", () => importRefInput.click());
+
+    importRefInput.addEventListener("change", async () => {
+      const file = importRefInput.files && importRefInput.files[0];
+      importRefInput.value = ""; // allow re-selecting the same file later
+      if (!file) return;
+
+      importRefBtn.disabled = true;
+      const originalText = importRefBtn.textContent;
+      importRefBtn.textContent = "Analyzing…";
+      if (importRefProgress) importRefProgress.hidden = false;
+      if (importRefProgressFill) importRefProgressFill.style.width = "0%";
+
+      try {
+        await engine.importReferenceTrack(file, (frac) => {
+          if (importRefProgressFill) importRefProgressFill.style.width = `${Math.round(frac * 100)}%`;
+        });
+      } catch (err) {
+        console.error("Reference track import failed:", err);
+        alert("Couldn't load that file — it may not be a supported audio format.");
+      } finally {
+        importRefBtn.textContent = originalText;
+        importRefBtn.disabled = false;
+        if (importRefProgress) importRefProgress.hidden = true;
+      }
+    });
+  }
+} catch (err) {
+  console.error("Reference track import setup failed (non-fatal):", err);
 }
 
 let updateSeekBarVisual = null;

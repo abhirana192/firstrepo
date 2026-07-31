@@ -33,7 +33,7 @@ export class TrackPanel {
 
       const name = document.createElement("div");
       name.className = "trackName";
-      name.textContent = track.name;
+      name.textContent = track.isReference ? `🎵 ${track.name}` : track.name;
 
       const dur = document.createElement("div");
       dur.className = "trackDur";
@@ -56,12 +56,16 @@ export class TrackPanel {
       toggle.setAttribute("aria-label", `Toggle ${track.name}`);
       toggle.onclick = () => this.engine.setEnabled(track.id, !track.enabled);
 
+      // Punch-in re-records a vocal take; doesn't apply to an imported
+      // reference track, so it's simply omitted from that row.
       const punchInBtn = document.createElement("button");
-      punchInBtn.className = "trackPunchIn";
-      punchInBtn.textContent = "⏺";
-      punchInBtn.disabled = this.engine.isRecording;
-      punchInBtn.setAttribute("aria-label", `Punch in and re-record ${track.name} from the current scrub position`);
-      punchInBtn.onclick = () => this.engine.startPunchIn(track.id);
+      if (!track.isReference) {
+        punchInBtn.className = "trackPunchIn";
+        punchInBtn.textContent = "⏺";
+        punchInBtn.disabled = this.engine.isRecording;
+        punchInBtn.setAttribute("aria-label", `Punch in and re-record ${track.name} from the current scrub position`);
+        punchInBtn.onclick = () => this.engine.startPunchIn(track.id);
+      }
 
       const downloadBtn = document.createElement("button");
       downloadBtn.className = "trackDownload";
@@ -81,7 +85,9 @@ export class TrackPanel {
         if (confirm(`Delete ${track.name}?`)) this.engine.deleteTrack(track.id);
       };
 
-      row.append(swatch, name, dur, muteBtn, soloBtn, toggle, punchInBtn, downloadBtn, del);
+      row.append(swatch, name, dur, muteBtn, soloBtn, toggle);
+      if (!track.isReference) row.append(punchInBtn);
+      row.append(downloadBtn, del);
       this.listEl.appendChild(row);
     }
   }

@@ -269,6 +269,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 4px 4px 8px;
+  gap: 8px;
 }
 
 #trackPanelTitle {
@@ -277,9 +278,16 @@ html, body {
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 
-#downloadMixBtn {
+#trackPanelHeaderBtns {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+}
+
+#downloadMixBtn, #importRefBtn {
   font-size: 12px;
   font-weight: 600;
   padding: 7px 12px;
@@ -287,9 +295,30 @@ html, body {
   border: 1px solid var(--border);
   background: #1b212b;
   color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
-#downloadMixBtn:disabled { color: var(--text-dim); opacity: 0.5; }
-#downloadMixBtn:active:not(:disabled) { transform: scale(0.96); }
+#downloadMixBtn:disabled, #importRefBtn:disabled { color: var(--text-dim); opacity: 0.5; }
+#downloadMixBtn:active:not(:disabled), #importRefBtn:active:not(:disabled) { transform: scale(0.96); }
+
+#importRefHint {
+  padding: 0 4px 8px;
+  max-width: none;
+}
+
+#importRefProgress {
+  height: 5px;
+  border-radius: 999px;
+  background: #232a35;
+  margin: 0 4px 10px;
+  overflow: hidden;
+}
+#importRefProgressFill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
 
 .trackRow {
   display: flex;

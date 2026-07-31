@@ -261,8 +261,11 @@ export class PitchGrid {
   }
 
   // Smooth, understated pitch line: a faint wide glow pass under a thin
-  // crisp core, rather than one thick neon stroke.
-  _drawCurve(points, color, ranges, dim) {
+  // crisp core, rather than one thick neon stroke. A reference track (an
+  // imported target to sing along to, not a performed layer) instead
+  // draws as a neutral dashed line, so it reads as "the note to hit"
+  // rather than one more colored performance.
+  _drawCurve(points, color, ranges, dim, isReference = false) {
     const ctx = this.ctx;
     const path = new Path2D();
     let drawing = false;
@@ -288,8 +291,18 @@ export class PitchGrid {
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    ctx.strokeStyle = color;
 
+    if (isReference) {
+      ctx.setLineDash([7, 5]);
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 1.6;
+      ctx.globalAlpha = dim ? 0.3 : 0.75;
+      ctx.stroke(path);
+      ctx.restore();
+      return;
+    }
+
+    ctx.strokeStyle = color;
     ctx.shadowColor = color;
     ctx.shadowBlur = 9;
     ctx.lineWidth = 3;
@@ -372,7 +385,7 @@ export class PitchGrid {
 
     for (const track of tracks) {
       if (!track.enabled) continue;
-      this._drawCurve(track.pitchData, track.color, ranges, track.muted);
+      this._drawCurve(track.pitchData, track.color, ranges, track.muted, track.isReference);
     }
 
     if (isRecording && liveRecordingPoints) {

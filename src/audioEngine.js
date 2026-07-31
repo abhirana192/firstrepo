@@ -1,4 +1,5 @@
 import { TRACK_COLORS } from "./noteUtils.js";
+import { analyzeBufferPitch } from "./offlinePitchAnalyzer.js";
 
 const LEAD_IN = 0.06; // seconds of scheduling headroom for Web Audio start() calls
 const SCHEDULE_AHEAD = 0.2; // how far ahead the loop scheduler queues the next iteration
@@ -204,6 +205,72 @@ export class AudioEngine {
         console.error("AudioContext resume failed:", err);
       }
     }
+  }
+
+  /**
+   * Imports a user-supplied audio file (something they already have the
+   * rights to — an instrumental, an a cappella reference, a backing
+   * track) as a read-along reference layer: its pitch curve is analyzed
+   * once and drawn on the grid like any other track, so you can see your
+   * live pitch against it while singing. If no loop exists yet, the
+   * file's own length defines the loop (same role the first take
+   * normally plays); if a loop already exists, the file is fit to it the
+   * same way an overdub is.
+   *
+   * @param {File|Blob} file
+   * @param {(fraction: number) => void} [onProgress]
+   */
+  async importReferenceTrack(file, onProgress) {
+    if (!this.ctx || this.isRecording) return null;
+    await this._ensureRunning();
+    if (!this.ctx || this.isRecording) return null;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const decoded = await this.ctx.decodeAudioData(arrayBuffer);
+
+    const id = this._nextTrackId++;
+    const isFirst = this.loopDuration === null;
+    let buffer;
+    if (isFirst) {
+      buffer = decoded;
+      this.loopDuration = decoded.duration;
+    } else {
+      const clipSamples = Math.min(decoded.length, Math.round(this.loopDuration * decoded.sampleRate));
+      buffer = this.ctx.createBuffer(1, Math.max(clipSamples, 1), decoded.sampleRate);
+      buffer.copyToChannel(decoded.getChannelData(0).subarray(0, clipSamples), 0);
+    }
+
+    const pitchData = await analyzeBufferPitch(buffer, onProgress);
+
+    const track = {
+      id,
+      name: file.name ? file.name.replace(/\.[^.]+$/, "") : `Reference ${id}`,
+      color: TRACK_COLORS[(id - 1) % TRACK_COLORS.length],
+      buffer,
+      pitchData,
+      muted: false,
+      soloed: false,
+      enabled: true,
+      durationSec: buffer.duration,
+      isReference: true,
+    };
+
+    const gain = this.ctx.createGain();
+    gain.connect(this.masterGain);
+    this._trackGains.set(id, gain);
+    this.tracks.push(track);
+
+    if (isFirst) {
+      this.loopOriginCtxTime = this.ctx.currentTime;
+      this._nextIterationStart = this.ctx.currentTime;
+      this.isPlaying = true;
+      this._scheduleIteration(this.ctx.currentTime);
+      this._nextIterationStart = this.ctx.currentTime + this.loopDuration;
+    }
+
+    this._emitTracks();
+    this._emitTransport();
+    return track;
   }
 
   async startRecording() {
