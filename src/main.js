@@ -21,32 +21,22 @@ const recordBtn = document.getElementById("recordBtn");
 const playBtn = document.getElementById("playBtn");
 const stopBtn = document.getElementById("stopBtn");
 const resetBtn = document.getElementById("resetBtn");
-const zoomInBtn = document.getElementById("zoomInBtn");
-const zoomOutBtn = document.getElementById("zoomOutBtn");
-const zoomResetBtn = document.getElementById("zoomResetBtn");
 const downloadMixBtn = document.getElementById("downloadMixBtn");
-const gainSlider = document.getElementById("gainSlider");
-const gainValue = document.getElementById("gainValue");
 
 let timeDomainBuffer = null;
 let transportState = { isPlaying: false, isRecording: false, loopDuration: null };
-
-// Restore last-used gain (device mic levels vary a lot; no single default
-// is right for everyone, so this is meant to be tuned live and remembered).
-const storedGain = parseFloat(localStorage.getItem("vocalPracticeInputGain"));
-if (!Number.isNaN(storedGain)) {
-  engine.inputGain = storedGain;
-  gainSlider.value = String(storedGain);
-}
-gainValue.textContent = `${parseFloat(gainSlider.value).toFixed(1)}x`;
-
-gainSlider.addEventListener("input", () => {
-  const value = parseFloat(gainSlider.value);
-  gainValue.textContent = `${value.toFixed(1)}x`;
-  engine.setInputGain(value);
-  localStorage.setItem("vocalPracticeInputGain", String(value));
-});
 const pitchSmoother = new PitchSmoother();
+
+// Restore the last-used gain onto the engine itself before init() runs, so
+// it's baked into the makeup-gain node at creation time. This part has no
+// DOM dependency; the slider *UI* sync happens later in
+// initOptionalFeatures(), after the engine (and thus the gain node) exists.
+try {
+  const storedGain = parseFloat(localStorage.getItem("vocalPracticeInputGain"));
+  if (!Number.isNaN(storedGain)) engine.inputGain = storedGain;
+} catch (err) {
+  console.error("Reading stored gain failed (non-fatal):", err);
+}
 
 function fmtTime(sec) {
   const m = Math.floor(sec / 60);
@@ -61,7 +51,7 @@ function updateTransportUI() {
   playBtn.disabled = !hasLoop || transportState.isRecording;
   stopBtn.disabled = !(transportState.isPlaying || transportState.isRecording);
   resetBtn.disabled = engine.tracks.length === 0;
-  downloadMixBtn.disabled = engine.tracks.length === 0;
+  if (downloadMixBtn) downloadMixBtn.disabled = engine.tracks.length === 0;
 
   if (transportState.isRecording) {
     statusText.textContent = hasLoop ? "Recording overdub…" : "Recording take 1 — this sets the loop length…";
@@ -86,6 +76,11 @@ engine.onTracksChanged = (tracks) => {
   updateTransportUI();
 };
 
+// --- Core transport: wired first and unconditionally, so a missing or
+// stale element anywhere else on the page (e.g. an older cached index.html
+// paired with a newer main.js) can never prevent recording/playback from
+// working — the failure mode that broke overdubbing entirely last time.
+
 enableBtn.addEventListener("click", async () => {
   enableBtn.disabled = true;
   enableBtn.textContent = "Requesting mic…";
@@ -94,8 +89,8 @@ enableBtn.addEventListener("click", async () => {
     timeDomainBuffer = new Float32Array(engine.analyser.fftSize);
     overlay.classList.add("hidden");
     recordBtn.disabled = false;
-    gainSlider.disabled = false;
     statusText.textContent = "Record your first take to set the loop length";
+    initOptionalFeatures();
   } catch (err) {
     console.error(err);
     enableBtn.disabled = false;
@@ -113,32 +108,74 @@ recordBtn.addEventListener("click", () => {
   }
 });
 
-zoomInBtn.addEventListener("click", () => grid.zoomIn());
-zoomOutBtn.addEventListener("click", () => grid.zoomOut());
-zoomResetBtn.addEventListener("click", () => grid.resetView());
-
 playBtn.addEventListener("click", () => engine.play());
 stopBtn.addEventListener("click", () => engine.stop());
 resetBtn.addEventListener("click", () => {
   if (confirm("Clear all layers and start a new loop?")) engine.resetLoop();
 });
 
-downloadMixBtn.addEventListener("click", async () => {
-  downloadMixBtn.disabled = true;
-  const originalText = downloadMixBtn.textContent;
-  downloadMixBtn.textContent = "Rendering…";
+// --- Everything below is supplementary UI. Each piece is wrapped so that
+// if one element is missing or one feature throws, the rest (including
+// the core transport above) keeps working regardless.
+
+function initOptionalFeatures() {
   try {
-    const mixBuffer = await engine.renderMixBuffer();
-    if (!mixBuffer) {
-      alert("Nothing is currently audible to mix — check that at least one layer isn't muted.");
-    } else {
-      downloadBlob(audioBufferToWavBlob(mixBuffer), "vocal-practice-mix.wav");
+    const gainSlider = document.getElementById("gainSlider");
+    const gainValue = document.getElementById("gainValue");
+    if (gainSlider && gainValue) {
+      // engine.inputGain was already restored (and baked into the makeup-
+      // gain node by engine.init()) before this ran — just sync the slider
+      // to reflect it.
+      gainSlider.value = String(engine.inputGain);
+      gainValue.textContent = `${engine.inputGain.toFixed(1)}x`;
+      gainSlider.disabled = false;
+      gainSlider.addEventListener("input", () => {
+        const value = parseFloat(gainSlider.value);
+        gainValue.textContent = `${value.toFixed(1)}x`;
+        engine.setInputGain(value);
+        localStorage.setItem("vocalPracticeInputGain", String(value));
+      });
     }
-  } finally {
-    downloadMixBtn.textContent = originalText;
-    downloadMixBtn.disabled = engine.tracks.length === 0;
+  } catch (err) {
+    console.error("Gain slider setup failed (non-fatal):", err);
   }
-});
+}
+
+try {
+  const zoomInBtn = document.getElementById("zoomInBtn");
+  const zoomOutBtn = document.getElementById("zoomOutBtn");
+  const zoomResetBtn = document.getElementById("zoomResetBtn");
+  if (zoomInBtn && zoomOutBtn && zoomResetBtn) {
+    zoomInBtn.addEventListener("click", () => grid.zoomIn());
+    zoomOutBtn.addEventListener("click", () => grid.zoomOut());
+    zoomResetBtn.addEventListener("click", () => grid.resetView());
+  }
+} catch (err) {
+  console.error("Zoom controls setup failed (non-fatal):", err);
+}
+
+try {
+  if (downloadMixBtn) {
+    downloadMixBtn.addEventListener("click", async () => {
+      downloadMixBtn.disabled = true;
+      const originalText = downloadMixBtn.textContent;
+      downloadMixBtn.textContent = "Rendering…";
+      try {
+        const mixBuffer = await engine.renderMixBuffer();
+        if (!mixBuffer) {
+          alert("Nothing is currently audible to mix — check that at least one layer isn't muted.");
+        } else {
+          downloadBlob(audioBufferToWavBlob(mixBuffer), "vocal-practice-mix.wav");
+        }
+      } finally {
+        downloadMixBtn.textContent = originalText;
+        downloadMixBtn.disabled = engine.tracks.length === 0;
+      }
+    });
+  }
+} catch (err) {
+  console.error("Download mix setup failed (non-fatal):", err);
+}
 
 function frame() {
   if (engine.ctx && timeDomainBuffer) {
