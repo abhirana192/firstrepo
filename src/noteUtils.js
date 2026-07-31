@@ -18,9 +18,10 @@ export function midiToNoteName(midi) {
   return `${name}${octave}`;
 }
 
-// F2 = MIDI 41 (~87.31 Hz), A5 = MIDI 81 (880 Hz) — the practice range
-// requested for the vocal monitor grid.
-export const MIN_MIDI = 41;
+// C2 = MIDI 36 (~65.41 Hz), A5 = MIDI 81 (880 Hz) — extended a few
+// semitones below the original F2 floor so baritone/bass notes don't get
+// silently clipped off the bottom of the grid.
+export const MIN_MIDI = 36;
 export const MAX_MIDI = 81;
 export const MIN_FREQ = midiToFreq(MIN_MIDI);
 export const MAX_FREQ = midiToFreq(MAX_MIDI);

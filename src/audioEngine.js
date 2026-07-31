@@ -60,35 +60,52 @@ export class AudioEngine {
 
     this.sourceNode = this.ctx.createMediaStreamSource(stream);
 
-    // Quiet input (soft/whispered singing) is otherwise too weak to pass
-    // the pitch detector's noise-floor threshold or to hear back on
-    // playback. A compressor pulls quiet passages up toward audibility;
-    // makeup gain then boosts overall level; a fast brickwall limiter
-    // afterward keeps normal/loud singing from clipping on the way out.
+    // A gentle compressor evens out dynamics without crushing normal
+    // singing (a low threshold + high ratio combo would flatten average
+    // level far more than a modest makeup gain could restore — that's
+    // what made an earlier version of this chain too quiet). Quiet/soft
+    // passages sit below the threshold and pass through mostly untouched,
+    // then get lifted by the makeup gain along with everything else. A
+    // fast brickwall limiter after the makeup gain stops loud singing
+    // from clipping on the way out.
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -50;
-    this.compressor.knee.value = 24;
-    this.compressor.ratio.value = 8;
-    this.compressor.attack.value = 0.003;
-    this.compressor.release.value = 0.25;
+    this.compressor.threshold.value = -28;
+    this.compressor.knee.value = 12;
+    this.compressor.ratio.value = 3;
+    this.compressor.attack.value = 0.02;
+    this.compressor.release.value = 0.2;
 
     this.makeupGain = this.ctx.createGain();
-    this.makeupGain.gain.value = 2.4;
+    this.makeupGain.gain.value = 4;
 
     this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -3;
+    this.limiter.threshold.value = -2;
     this.limiter.knee.value = 0;
     this.limiter.ratio.value = 20;
     this.limiter.attack.value = 0.001;
     this.limiter.release.value = 0.1;
 
+    // DynamicsCompressorNode's gain reduction is envelope-smoothed, so a
+    // sudden loud attack can still overshoot 0dB before it catches up.
+    // A WaveShaperNode's curve is a true sample-accurate clamp — anything
+    // outside [-1, 1] maps straight to the nearest curve endpoint — so it
+    // acts as a real brickwall backstop with no attack lag at all.
+    this.clipper = this.ctx.createWaveShaper();
+    this.clipper.curve = new Float32Array([-0.98, 0, 0.98]);
+    this.clipper.oversample = "2x";
+
     this.sourceNode.connect(this.compressor);
     this.compressor.connect(this.makeupGain);
     this.makeupGain.connect(this.limiter);
-    this.processedInput = this.limiter;
+    this.limiter.connect(this.clipper);
+    this.processedInput = this.clipper;
 
+    // A bigger analysis window gives the pitch detector enough cycles of
+    // a low bass note to autocorrelate reliably (2048 samples starts
+    // running out of headroom well before F2, contributing to low notes
+    // getting dropped).
     this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 2048;
+    this.analyser.fftSize = 4096;
     this.analyser.smoothingTimeConstant = 0;
     this.processedInput.connect(this.analyser);
 

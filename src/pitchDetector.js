@@ -1,9 +1,9 @@
 // Autocorrelation-based pitch detector (ACF2+ style), bounded to the
 // vocal range we care about so it stays cheap enough for 60fps on a phone.
 
-const MIN_FREQ_HZ = 65;   // below F2, gives the parabolic fit some headroom
+const MIN_FREQ_HZ = 55;   // below the C2 grid floor, gives the parabolic fit some headroom
 const MAX_FREQ_HZ = 1100; // above A5, same reason
-const ANALYSIS_WINDOW = 1024; // samples correlated at each lag
+const ANALYSIS_WINDOW = 1536; // samples correlated at each lag (needs the bigger analyser buffer to fit)
 const RMS_SILENCE_THRESHOLD = 0.005;
 
 /**
